@@ -3,6 +3,8 @@ import os
 import os.path as osp
 import re
 import shutil
+import shlex
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -110,6 +112,56 @@ def _get_session(proxy, use_cookies, user_agent, return_cookies_file=False):
         return sess
 
 
+def aria2_download(
+    url, output, quiet, proxy, cookies_file, resume, user_agent, verify, aria2_args
+):
+    if not shutil.which("aria2c"):
+        print("aria2c is not found, falling back to requests.", file=sys.stderr)
+        return False
+
+    cmd = ["aria2c", str(url), "--out", output]
+    if not quiet:
+        cmd.append("--console-log-level=notice")
+    else:
+        cmd.append("--quiet=true")
+
+    if user_agent:
+        cmd.append(f"--user-agent={user_agent}")
+
+    if not verify:
+        cmd.append("--check-certificate=false")
+
+    if proxy:
+        cmd.append(f"--all-proxy={proxy}")
+
+    if cookies_file and osp.exists(cookies_file):
+        cmd.append(f"--load-cookies={cookies_file}")
+
+    if resume or os.path.isfile(output + ".aria2"):
+        cmd.append("--continue=true")
+
+    # Increase performance
+    cmd.append("--split=5")
+    cmd.append("--max-connection-per-server=5")
+    cmd.append("--min-split-size=1M")
+    cmd.append("--file-allocation=none")
+
+    # Handle file existence consistently with gdown
+    cmd.append("--auto-file-renaming=false")
+    if not resume:
+        cmd.append("--allow-overwrite=true")
+
+    if aria2_args:
+        cmd.extend(shlex.split(aria2_args))
+
+    try:
+        subprocess.run(cmd, check=True)
+        return True
+    except subprocess.CalledProcessError:
+        print("aria2c failed, falling back to requests.", file=sys.stderr)
+        return False
+
+
 def download(
     url=None,
     output=None,
@@ -120,10 +172,13 @@ def download(
     verify=True,
     id=None,
     fuzzy=False,
-    resume=False,
+    resume=True,
     format=None,
     user_agent=None,
     log_messages=None,
+    use_aria2=False,
+    aria2_args=None,
+    skip_if_exists=True,
 ):
     """Download file from URL.
 
@@ -295,10 +350,46 @@ def download(
         output = osp.join(output, filename_from_url)
 
     if output_is_path:
-        if resume and os.path.isfile(output):
+        is_aria2_incomplete = use_aria2 and os.path.isfile(output + ".aria2")
+        if (resume or skip_if_exists) and os.path.isfile(output) and not is_aria2_incomplete:
             if not quiet:
                 print(f"Skipping already downloaded file {output}", file=sys.stderr)
             return output
+
+        if use_aria2:
+            if not quiet:
+                print(
+                    log_messages.get("start", "Downloading...\n"),
+                    file=sys.stderr,
+                    end="",
+                )
+                if url_origin != url:
+                    print("From (original):", url_origin, file=sys.stderr)
+                    print("From (redirected):", url, file=sys.stderr)
+                else:
+                    print("From:", url, file=sys.stderr)
+                print(
+                    log_messages.get(
+                        "output",
+                        f"To: {osp.abspath(output) if output_is_path else output}\n",
+                    ),
+                    file=sys.stderr,
+                    end="",
+                )
+
+            success = aria2_download(
+                url=res.url,
+                output=output,
+                quiet=quiet,
+                proxy=proxy,
+                cookies_file=cookies_file,
+                resume=resume,
+                user_agent=user_agent,
+                verify=verify,
+                aria2_args=aria2_args,
+            )
+            if success:
+                return output
 
         existing_tmp_files = []
         for file in os.listdir(osp.dirname(output) or "."):

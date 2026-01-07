@@ -209,7 +209,10 @@ def download_folder(
     verify=True,
     user_agent=None,
     skip_download: bool = False,
-    resume=False,
+    resume=True,
+    use_aria2=False,
+    aria2_args=None,
+    skip_if_exists=True,
 ) -> Union[List[str], List[GoogleDriveFileToDownload], None]:
     """Downloads entire folder from URL.
 
@@ -313,7 +316,8 @@ def download_folder(
                 GoogleDriveFileToDownload(id=id, path=path, local_path=local_path)
             )
         else:
-            if resume and os.path.isfile(local_path):
+            is_aria2_incomplete = use_aria2 and os.path.isfile(local_path + ".aria2")
+            if (resume or skip_if_exists) and os.path.isfile(local_path) and not is_aria2_incomplete:
                 if not quiet:
                     print(
                         f"Skipping already downloaded file {local_path}",
@@ -331,6 +335,9 @@ def download_folder(
                 use_cookies=use_cookies,
                 verify=verify,
                 resume=resume,
+                use_aria2=use_aria2,
+                aria2_args=aria2_args,
+                skip_if_exists=skip_if_exists,
             )
             if local_path is None:
                 if not quiet:

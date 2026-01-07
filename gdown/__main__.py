@@ -1,6 +1,8 @@
 import argparse
+import os
 import os.path
 import re
+import signal
 import sys
 import textwrap
 import warnings
@@ -44,7 +46,15 @@ def file_size(argv):
         return size
 
 
-def main():
+def signal_handler(sig, frame):
+    print("\nInterrupted by user.", file=sys.stderr)
+    os._exit(130)
+
+
+import threading
+
+
+def run_main_logic():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
@@ -105,8 +115,8 @@ def main():
         "-c",
         dest="continue_",
         action="store_true",
-        help="resume getting partially-downloaded files while "
-        "skipping fully downloaded ones",
+        default=True,
+        help="resume getting partially-downloaded files (default: True)",
     )
     parser.add_argument(
         "--folder",
@@ -128,6 +138,26 @@ def main():
     parser.add_argument(
         "--user-agent",
         help="User-Agent to use for downloading file.",
+    )
+    parser.add_argument(
+        "--aria2c",
+        action="store_true",
+        help="use aria2c for download",
+    )
+    parser.add_argument(
+        "--aria2c-args",
+        help="additional arguments for aria2c",
+    )
+    parser.add_argument(
+        "--skip-if-exists",
+        action="store_true",
+        default=True,
+        help="skip download if file already exists (default: True)",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="overwrite existing file if it already exists",
     )
 
     args = parser.parse_args()
@@ -154,34 +184,50 @@ def main():
 
     try:
         if args.folder:
-            download_folder(
-                url=url,
-                id=id,
-                output=args.output,
-                quiet=args.quiet,
-                proxy=args.proxy,
-                speed=args.speed,
-                use_cookies=not args.no_cookies,
-                verify=not args.no_check_certificate,
-                remaining_ok=args.remaining_ok,
-                user_agent=args.user_agent,
-                resume=args.continue_,
+            download_for_threading = threading.Thread(
+                target=download_folder,
+                kwargs=dict(
+                    url=url,
+                    id=id,
+                    output=args.output,
+                    quiet=args.quiet,
+                    proxy=args.proxy,
+                    speed=args.speed,
+                    use_cookies=not args.no_cookies,
+                    verify=not args.no_check_certificate,
+                    remaining_ok=args.remaining_ok,
+                    user_agent=args.user_agent,
+                    resume=args.continue_ and not args.overwrite,
+                    use_aria2=args.aria2c,
+                    aria2_args=args.aria2c_args,
+                    skip_if_exists=args.skip_if_exists and not args.overwrite,
+                ),
             )
         else:
-            download(
-                url=url,
-                output=args.output,
-                quiet=args.quiet,
-                proxy=args.proxy,
-                speed=args.speed,
-                use_cookies=not args.no_cookies,
-                verify=not args.no_check_certificate,
-                id=id,
-                fuzzy=args.fuzzy,
-                resume=args.continue_,
-                format=args.format,
-                user_agent=args.user_agent,
+            download_for_threading = threading.Thread(
+                target=download,
+                kwargs=dict(
+                    url=url,
+                    output=args.output,
+                    quiet=args.quiet,
+                    proxy=args.proxy,
+                    speed=args.speed,
+                    use_cookies=not args.no_cookies,
+                    verify=not args.no_check_certificate,
+                    id=id,
+                    fuzzy=args.fuzzy,
+                    resume=args.continue_ and not args.overwrite,
+                    format=args.format,
+                    user_agent=args.user_agent,
+                    use_aria2=args.aria2c,
+                    aria2_args=args.aria2c_args,
+                    skip_if_exists=args.skip_if_exists and not args.overwrite,
+                ),
             )
+        download_for_threading.daemon = True
+        download_for_threading.start()
+        while download_for_threading.is_alive():
+            download_for_threading.join(timeout=0.1)
     except FileURLRetrievalError as e:
         print(e, file=sys.stderr)
         sys.exit(1)
@@ -211,6 +257,11 @@ def main():
             file=sys.stderr,
         )
         sys.exit(1)
+
+
+def main():
+    signal.signal(signal.SIGINT, signal_handler)
+    run_main_logic()
 
 
 if __name__ == "__main__":
