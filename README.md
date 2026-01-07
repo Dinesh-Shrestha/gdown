@@ -12,6 +12,8 @@
 
 *Gdown* provides what curl/wget doesn't for Google Drive:
 - **Skip the security notice** allowing you to download large files (curl/wget fails);
+- **Multi-connection download** via `aria2c` for 10x faster speeds;
+- **Smart Resumption and Skip by default** for efficient bandwidth usage;
 - **Recursive download** of files in a folder (maximum 50 files per folder);
 - **Specify download file format** for Google Slides/Sheet/Docs like PDF/XML/CSV.
 
@@ -23,6 +25,9 @@
 
 ```bash
 pip install gdown
+
+# to install this enhanced fork with aria2c and smart-resumption support:
+pip install git+https://github.com/Dinesh-Shrestha/gdown.git
 
 # to upgrade
 pip install --upgrade gdown
@@ -74,8 +79,25 @@ $ cat ip.json
 
 $ # write stdout and pipe to extract
 $ gdown https://github.com/wkentaro/gdown/archive/refs/tags/v4.0.0.tar.gz -O - --quiet | tar zxvf -
-$ ls gdown-4.0.0/
-gdown  github2pypi  LICENSE  MANIFEST.in  pyproject.toml  README.md  setup.cfg  setup.py  tests
+
+### High-Speed Downloads (aria2c)
+
+*Gdown* now integrates with `aria2c` for significantly faster multi-connection downloads. 
+Smart resumption and skipping are enabled by default—if a download is interrupted, it will pick up exactly where it left off on the next run.
+
+```bash
+# Basic high-speed download
+$ gdown --aria2c 1l_5RK28JRL19wpT22B-DY9We3TVXnnQQ
+
+# High-speed folder download
+$ gdown --aria2c --folder 15uNXeRBIhVvZJIhL4yTw4IsStMhUaaxl
+
+# Custom connections (e.g., 16 connections)
+$ gdown --aria2c --aria2c-args="-x 16 -s 16" 1l_5RK28JRL19wpT22B-DY9We3TVXnnQQ
+
+# Force re-download (ignore existing files)
+$ gdown --aria2c --overwrite 1l_5RK28JRL19wpT22B-DY9We3TVXnnQQ
+```
 ```
 
 ### via Python
@@ -105,9 +127,11 @@ gdown.cached_download(url, output, hash=hash, postprocess=gdown.extractall)
 url = "https://drive.google.com/drive/folders/15uNXeRBIhVvZJIhL4yTw4IsStMhUaaxl"
 gdown.download_folder(url)
 
-# same as the above, but with the folder ID
-id = "15uNXeRBIhVvZJIhL4yTw4IsStMhUaaxl"
-gdown.download_folder(id=id)
+# High-speed download using aria2c
+gdown.download(url, output, use_aria2=True)
+
+# High-speed folder download with custom aria2c arguments
+gdown.download_folder(url, use_aria2=True, aria2_args="-x 16 -s 16")
 ```
 
 
